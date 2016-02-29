@@ -40,7 +40,7 @@ rbush.prototype = {
             result = [],
             toBBox = this.toBBox;
 
-        if (!intersects(bbox, node.bbox)) return result;
+        if (!intersects(this._dimension, bbox, node.bbox)) return result;
 
         var nodesToSearch = [],
             i, len, child, childBBox;
@@ -51,9 +51,9 @@ rbush.prototype = {
                 child = node.children[i];
                 childBBox = node.leaf ? toBBox(child) : child.bbox;
 
-                if (intersects(bbox, childBBox)) {
+                if (intersects(this._dimension, bbox, childBBox)) {
                     if (node.leaf) result.push(child);
-                    else if (contains(bbox, childBBox)) this._all(child, result);
+                    else if (contains(this._dimension, bbox, childBBox)) this._all(child, result);
                     else nodesToSearch.push(child);
                 }
             }
@@ -68,7 +68,7 @@ rbush.prototype = {
         var node = this.data,
             toBBox = this.toBBox;
 
-        if (!intersects(bbox, node.bbox)) return false;
+        if (!intersects(this._dimension, bbox, node.bbox)) return false;
 
         var nodesToSearch = [],
             i, len, child, childBBox;
@@ -79,8 +79,8 @@ rbush.prototype = {
                 child = node.children[i];
                 childBBox = node.leaf ? toBBox(child) : child.bbox;
 
-                if (intersects(bbox, childBBox)) {
-                    if (node.leaf || contains(bbox, childBBox)) return true;
+                if (intersects(this._dimension, bbox, childBBox)) {
+                    if (node.leaf || contains(this._dimension, bbox, childBBox)) return true;
                     nodesToSearch.push(child);
                 }
             }
@@ -172,7 +172,7 @@ rbush.prototype = {
                 }
             }
 
-            if (!goingUp && !node.leaf && contains(node.bbox, bbox)) { // go down
+            if (!goingUp && !node.leaf && contains(this._dimension, node.bbox, bbox)) { // go down
                 path.push(node);
                 indexes.push(i);
                 i = 0;
@@ -226,7 +226,7 @@ rbush.prototype = {
                 bbox: null,
                 leaf: true
             };
-            calcBBox(node, this.toBBox);
+            calcBBox(this._dimension, node, this.toBBox);
             return node;
         }
 
@@ -265,7 +265,7 @@ rbush.prototype = {
         }.bind(this);
         buildAxis(0, left, right, N1, N2);
 
-        calcBBox(node, this.toBBox);
+        calcBBox(this._dimension, node, this.toBBox);
 
         return node;
     },
@@ -283,8 +283,8 @@ rbush.prototype = {
 
             for (i = 0, len = node.children.length; i < len; i++) {
                 child = node.children[i];
-                area = bboxArea(child.bbox);
-                enlargement = enlargedArea(bbox, child.bbox) - area;
+                area = bboxArea(this._dimension, child.bbox);
+                enlargement = enlargedArea(this._dimension, bbox, child.bbox) - area;
 
                 // choose entry with the least area enlargement
                 if (enlargement < minEnlargement) {
@@ -318,7 +318,7 @@ rbush.prototype = {
 
         // put the item into the node
         node.children.push(item);
-        extend(node.bbox, bbox);
+        extend(this._dimension, node.bbox, bbox);
 
         // split on node overflow; propagate upwards if necessary
         while (level >= 0) {
@@ -352,8 +352,8 @@ rbush.prototype = {
 
         if (node.leaf) newNode.leaf = true;
 
-        calcBBox(node, this.toBBox);
-        calcBBox(newNode, this.toBBox);
+        calcBBox(this._dimension, node, this.toBBox);
+        calcBBox(this._dimension, newNode, this.toBBox);
 
         if (level) insertPath[level - 1].children.push(newNode);
         else this._splitRoot(node, newNode);
@@ -367,7 +367,7 @@ rbush.prototype = {
             bbox: null,
             leaf: false
         };
-        calcBBox(this.data, this.toBBox);
+        calcBBox(this._dimension, this.data, this.toBBox);
     },
 
     _chooseSplitIndex: function (node, m, M) {
@@ -377,11 +377,11 @@ rbush.prototype = {
         minOverlap = minArea = Infinity;
 
         for (i = m; i <= M - m; i++) {
-            bbox1 = distBBox(node, 0, i, this.toBBox);
-            bbox2 = distBBox(node, i, M, this.toBBox);
+            bbox1 = distBBox(this._dimension, node, 0, i, this.toBBox);
+            bbox2 = distBBox(this._dimension, node, i, M, this.toBBox);
 
-            overlap = intersectionArea(bbox1, bbox2);
-            area = bboxArea(bbox1) + bboxArea(bbox2);
+            overlap = intersectionArea(this._dimension, bbox1, bbox2);
+            area = bboxArea(this._dimension, bbox1) + bboxArea(this._dimension, bbox2);
 
             // choose distribution with minimum overlap
             if (overlap < minOverlap) {
@@ -428,21 +428,21 @@ rbush.prototype = {
         node.children.sort(compare.bind(node.children, axis));
 
         var toBBox = this.toBBox,
-            leftBBox = distBBox(node, 0, m, toBBox),
-            rightBBox = distBBox(node, M - m, M, toBBox),
-            margin = bboxMargin(leftBBox) + bboxMargin(rightBBox),
+            leftBBox = distBBox(this._dimension, node, 0, m, toBBox),
+            rightBBox = distBBox(this._dimension, node, M - m, M, toBBox),
+            margin = bboxMargin(this._dimension, leftBBox) + bboxMargin(this._dimension, rightBBox),
             i, child;
 
         for (i = m; i < M - m; i++) {
             child = node.children[i];
-            extend(leftBBox, node.leaf ? toBBox(child) : child.bbox);
-            margin += bboxMargin(leftBBox);
+            extend(this._dimension, leftBBox, node.leaf ? toBBox(child) : child.bbox);
+            margin += bboxMargin(this._dimension, leftBBox);
         }
 
         for (i = M - m - 1; i >= m; i--) {
             child = node.children[i];
-            extend(rightBBox, node.leaf ? toBBox(child) : child.bbox);
-            margin += bboxMargin(rightBBox);
+            extend(this._dimension, rightBBox, node.leaf ? toBBox(child) : child.bbox);
+            margin += bboxMargin(this._dimension, rightBBox);
         }
 
         return margin;
@@ -451,7 +451,7 @@ rbush.prototype = {
     _adjustParentBBoxes: function (bbox, path, level) {
         // adjust bboxes along the given tree path
         for (var i = level; i >= 0; i--) {
-            extend(path[i].bbox, bbox);
+            extend(this._dimension, path[i].bbox, bbox);
         }
     },
 
@@ -465,7 +465,7 @@ rbush.prototype = {
 
                 } else this.clear();
 
-            } else calcBBox(path[i], this.toBBox);
+            } else calcBBox(this._dimension, path[i], this.toBBox);
         }
     },
 
@@ -488,22 +488,22 @@ rbush.prototype = {
 
 
 // calculate node's bbox from bboxes of its children
-function calcBBox(node, toBBox) {
-    node.bbox = distBBox(node, 0, node.children.length, toBBox);
+function calcBBox(dim, node, toBBox) {
+    node.bbox = distBBox(dim, node, 0, node.children.length, toBBox);
 }
 
 // min bounding rectangle of node children from k to p-1
-function distBBox(node, k, p, toBBox) {
+function distBBox(dim, node, k, p, toBBox) {
     var bbox = empty();
 
     for (var i = k, child; i < p; i++) {
         child = node.children[i];
-        extend(bbox, node.leaf ? toBBox(child) : child.bbox);
+        extend(dim, bbox, node.leaf ? toBBox(child) : child.bbox);
     }
 
     return bbox;
 }
-
+// global functions don't know dimension
 var __empty__;
 function empty(d) {
   if (!__empty__) {
@@ -518,8 +518,8 @@ function empty(d) {
   }
 }
 
-function extend(a, b) {
-    var j, i, dim = this._dimension;
+function extend(dim, a, b) {
+    var j, i;
     for (i = 0; i < dim; ++i) {
       j = dim + i;
       a[i] = Math.min(a[i], b[i]);
@@ -530,20 +530,18 @@ function extend(a, b) {
 
 function compareNodeMin(axis, a, b) { return a.bbox[axis] - b.bbox[axis]; }
 
-function bboxArea(a)   {
+function bboxArea(dim, a)   {
   var j, i,
-    area = 1,
-    dim = this._dimension;
+    area = 1;
   for (i = 0; i < dim; ++i) {
     j = dim + i;
     area *= a[j] - a[i];
   }
   return area;
 }
-function bboxMargin(a) {
+function bboxMargin(dim, a) {
   var j, i,
-    margin = 0,
-    dim = this._dimension;
+    margin = 0;
   for (i = 0; i < dim; ++i) {
     j = dim + i;
     margin += a[j] - a[i];
@@ -551,10 +549,9 @@ function bboxMargin(a) {
   return margin;
 }
 
-function enlargedArea(a, b) {
+function enlargedArea(dim, a, b) {
   var j, i,
-    area = 1,
-    dim = this._dimension;
+    area = 1;
   for (i = 0; i < dim; ++i) {
     j = dim + i;
     area *= Math.max(b[j], a[j]) - Math.min(b[i], a[i]);
@@ -562,10 +559,9 @@ function enlargedArea(a, b) {
   return area;
 }
 
-function intersectionArea(a, b) {
+function intersectionArea(dim, a, b) {
   var j, i,
-    area = 1,
-    dim = this._dimension;
+    area = 1;
   for (i = 0; i < dim; ++i) {
     j = dim + i;
     area *= Math.max(0, Math.max(b[i], a[i]) - Math.min(b[j], a[j]));
@@ -574,8 +570,8 @@ function intersectionArea(a, b) {
   return area;
 }
 
-function contains(a, b) {
-  var j, i, dim = this._dimension;
+function contains(dim, a, b) {
+  var j, i;
   for (i = 0; i < dim; ++i) {
     j = dim + i;
     if (a[i] > b[i] || b[j] > a[j]) return false;
@@ -583,12 +579,12 @@ function contains(a, b) {
   return true;
 }
 
-function intersects(a, b) {
+function intersects(dim, a, b) {
 //     return b[0] <= a[2] &&
 //            b[1] <= a[3] &&
 //            b[2] >= a[0] &&
 //            b[3] >= a[1];
-  var j, i, dim = this._dimension;
+  var j, i;
   for (i = 0; i < dim; ++i) {
     j = dim + i;
     if (a[j] > b[i] || b[j] < a[i]) return false;
