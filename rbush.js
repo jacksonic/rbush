@@ -7,10 +7,15 @@
 (function () {
 'use strict';
 
-function rbush(maxEntries, format) {
+function rbush(maxEntries, format, dimension) {
 
     // jshint newcap: false, validthis: true
-    if (!(this instanceof rbush)) return new rbush(maxEntries, format);
+    if (!(this instanceof rbush)) return new rbush(maxEntries, format, dimension);
+
+    // dimensions specifies the number of axes (2 ==> x,y; 3 ==> x,y,z; ...)
+    dimension = parseInt(dimension);
+    if (dimension < 2) dimension = 2;
+    this._dimension = dimension;
 
     // max entries in a node is 9 by default; min node fill is 40% for best performance
     this._maxEntries = Math.max(4, maxEntries || 9);
@@ -187,8 +192,7 @@ rbush.prototype = {
 
     toBBox: function (item) { return item; },
 
-    compareMinX: function (a, b) { return a[0] - b[0]; },
-    compareMinY: function (a, b) { return a[1] - b[1]; },
+    compareMin: function (axis, a, b) { return a[axis] - b[axis]; },
 
     toJSON: function () { return this.data; },
 
@@ -241,28 +245,25 @@ rbush.prototype = {
             leaf: false
         };
 
-        // split the items into M mostly square tiles
+        // split the items into M mostly square/cube tiles
 
         var N2 = Math.ceil(N / M),
-            N1 = N2 * Math.ceil(Math.sqrt(M)),
-            i, j, right2, right3;
+            N1 = N2 * Math.ceil(Math.sqrt(M));
 
-        multiSelect(items, left, right, N1, this.compareMinX);
+        var buildAxis = function buildAxis(axis, left, right, N1, N2) {
+          multiSelect(items, left, right, N1, this.compareMin, axis);
 
-        for (i = left; i <= right; i += N1) {
-
-            right2 = Math.min(i + N1 - 1, right);
-
-            multiSelect(items, i, right2, N2, this.compareMinY);
-
-            for (j = i; j <= right2; j += N2) {
-
-                right3 = Math.min(j + N2 - 1, right2);
-
-                // pack each entry recursively
-                node.children.push(this._build(items, j, right3, height - 1));
+          for (var i = left; i <= right; i += N1) {
+            var newRight = Math.min(i + N1 - 1, right);
+            if (axis + 1 < this._dimension) {
+              buildAxis(axis + 1, i, newRight, N2, N1); // swap N1, N2 each recursion?
+            } else {
+              // pack each entry recursively
+              node.children.push(this._build(items, i, newRight, height - 1));
             }
-        }
+          }
+        }.bind(this);
+        buildAxis(0, left, right, N1, N2);
 
         calcBBox(node, this.toBBox);
 
@@ -403,21 +404,28 @@ rbush.prototype = {
 
     // sorts node children by the best axis for split
     _chooseSplitAxis: function (node, m, M) {
-
-        var compareMinX = node.leaf ? this.compareMinX : compareNodeMinX,
-            compareMinY = node.leaf ? this.compareMinY : compareNodeMinY,
-            xMargin = this._allDistMargin(node, m, M, compareMinX),
-            yMargin = this._allDistMargin(node, m, M, compareMinY);
-
+        var a;
+        var bestAxis = 0;
+        var bestMargin = Math.Infinity;
+        for (a = 0; a < this._dimension; ++a) {
+          var compareMin = node.leaf ? this.compareMin : compareNodeMin;
+          var margin = this._allDistMargin(node, m, M, compareMin, a);
+          if (margin <= bestMargin) {
+            bestMargin = margin;
+            bestAxis = a;
+          }
+        }
         // if total distributions margin value is minimal for x, sort by minX,
         // otherwise it's already sorted by minY
-        if (xMargin < yMargin) node.children.sort(compareMinX);
+        if (a < this._dimension) {
+          node.children.sort(compareMin.bind(node.children, bestAxis));
+        }
     },
 
     // total margin of all possible split distributions where each node is at least m full
-    _allDistMargin: function (node, m, M, compare) {
+    _allDistMargin: function (node, m, M, compare, axis) {
 
-        node.children.sort(compare);
+        node.children.sort(compare.bind(node.children, axis));
 
         var toBBox = this.toBBox,
             leftBBox = distBBox(node, 0, m, toBBox),
@@ -472,8 +480,7 @@ rbush.prototype = {
 
         var compareArr = ['return a', ' - b', ';'];
 
-        this.compareMinX = new Function('a', 'b', compareArr.join(format[0]));
-        this.compareMinY = new Function('a', 'b', compareArr.join(format[1]));
+        this.compareMin = new Function('axis', 'a', 'b', compareArr.join(format[0]));
 
         this.toBBox = new Function('a', 'return [a' + format.join(', a') + '];');
     }
@@ -497,55 +504,102 @@ function distBBox(node, k, p, toBBox) {
     return bbox;
 }
 
-function empty() { return [Infinity, Infinity, -Infinity, -Infinity]; }
+var __empty__;
+function empty(d) {
+  if (!__empty__) {
+    var ret = __empty__ = [];
+    for (var i = 0; i < d; ++i) {
+      ret[i] = Infinity;
+      ret[d + i] = -Infinity;
+    }
+    return ret.slice();
+  } else {
+    return __empty__.slice();
+  }
+}
 
 function extend(a, b) {
-    a[0] = Math.min(a[0], b[0]);
-    a[1] = Math.min(a[1], b[1]);
-    a[2] = Math.max(a[2], b[2]);
-    a[3] = Math.max(a[3], b[3]);
+    var j, i, dim = this._dimension;
+    for (i = 0; i < dim; ++i) {
+      j = dim + i;
+      a[i] = Math.min(a[i], b[i]);
+      a[j] = Math.max(a[j], b[j]);
+    }
     return a;
 }
 
-function compareNodeMinX(a, b) { return a.bbox[0] - b.bbox[0]; }
-function compareNodeMinY(a, b) { return a.bbox[1] - b.bbox[1]; }
+function compareNodeMin(axis, a, b) { return a.bbox[axis] - b.bbox[axis]; }
 
-function bboxArea(a)   { return (a[2] - a[0]) * (a[3] - a[1]); }
-function bboxMargin(a) { return (a[2] - a[0]) + (a[3] - a[1]); }
+function bboxArea(a)   {
+  var j, i,
+    area = 1,
+    dim = this._dimension;
+  for (i = 0; i < dim; ++i) {
+    j = dim + i;
+    area *= a[j] - a[i];
+  }
+  return area;
+}
+function bboxMargin(a) {
+  var j, i,
+    margin = 0,
+    dim = this._dimension;
+  for (i = 0; i < dim; ++i) {
+    j = dim + i;
+    margin += a[j] - a[i];
+  }
+  return margin;
+}
 
 function enlargedArea(a, b) {
-    return (Math.max(b[2], a[2]) - Math.min(b[0], a[0])) *
-           (Math.max(b[3], a[3]) - Math.min(b[1], a[1]));
+  var j, i,
+    area = 1,
+    dim = this._dimension;
+  for (i = 0; i < dim; ++i) {
+    j = dim + i;
+    area *= Math.max(b[j], a[j]) - Math.min(b[i], a[i]);
+  }
+  return area;
 }
 
 function intersectionArea(a, b) {
-    var minX = Math.max(a[0], b[0]),
-        minY = Math.max(a[1], b[1]),
-        maxX = Math.min(a[2], b[2]),
-        maxY = Math.min(a[3], b[3]);
-
-    return Math.max(0, maxX - minX) *
-           Math.max(0, maxY - minY);
+  var j, i,
+    area = 1,
+    dim = this._dimension;
+  for (i = 0; i < dim; ++i) {
+    j = dim + i;
+    area *= Math.max(0, Math.max(b[i], a[i]) - Math.min(b[j], a[j]));
+    if (area === 0) break;
+  }
+  return area;
 }
 
 function contains(a, b) {
-    return a[0] <= b[0] &&
-           a[1] <= b[1] &&
-           b[2] <= a[2] &&
-           b[3] <= a[3];
+  var j, i, dim = this._dimension;
+  for (i = 0; i < dim; ++i) {
+    j = dim + i;
+    if (a[i] > b[i] || b[j] > a[j]) return false;
+  }
+  return true;
 }
 
 function intersects(a, b) {
-    return b[0] <= a[2] &&
-           b[1] <= a[3] &&
-           b[2] >= a[0] &&
-           b[3] >= a[1];
+//     return b[0] <= a[2] &&
+//            b[1] <= a[3] &&
+//            b[2] >= a[0] &&
+//            b[3] >= a[1];
+  var j, i, dim = this._dimension;
+  for (i = 0; i < dim; ++i) {
+    j = dim + i;
+    if (a[j] > b[i] || b[j] < a[i]) return false;
+  }
+  return true;
 }
 
 // sort an array so that items come in groups of n unsorted items, with groups sorted between each other;
 // combines selection algorithm with binary divide & conquer approach
 
-function multiSelect(arr, left, right, n, compare) {
+function multiSelect(arr, left, right, n, compare, axis) {
     var stack = [left, right],
         mid;
 
@@ -556,7 +610,7 @@ function multiSelect(arr, left, right, n, compare) {
         if (right - left <= n) continue;
 
         mid = left + Math.ceil((right - left) / n / 2) * n;
-        select(arr, left, right, mid, compare);
+        select(arr, left, right, mid, compare, axis);
 
         stack.push(left, mid, mid, right);
     }
@@ -564,7 +618,7 @@ function multiSelect(arr, left, right, n, compare) {
 
 // Floyd-Rivest selection algorithm:
 // sort an array between left and right (inclusive) so that the smallest k elements come first (unordered)
-function select(arr, left, right, k, compare) {
+function select(arr, left, right, k, compare, axis) {
     var n, i, z, s, sd, newLeft, newRight, t, j;
 
     while (right > left) {
@@ -576,7 +630,7 @@ function select(arr, left, right, k, compare) {
             sd = 0.5 * Math.sqrt(z * s * (n - s) / n) * (i - n / 2 < 0 ? -1 : 1);
             newLeft = Math.max(left, Math.floor(k - i * s / n + sd));
             newRight = Math.min(right, Math.floor(k + (n - i) * s / n + sd));
-            select(arr, newLeft, newRight, k, compare);
+            select(arr, newLeft, newRight, k, compare, axis);
         }
 
         t = arr[k];
@@ -584,17 +638,17 @@ function select(arr, left, right, k, compare) {
         j = right;
 
         swap(arr, left, k);
-        if (compare(arr[right], t) > 0) swap(arr, left, right);
+        if (compare(axis, arr[right], t) > 0) swap(arr, left, right);
 
         while (i < j) {
             swap(arr, i, j);
             i++;
             j--;
-            while (compare(arr[i], t) < 0) i++;
-            while (compare(arr[j], t) > 0) j--;
+            while (compare(axis, arr[i], t) < 0) i++;
+            while (compare(axis, arr[j], t) > 0) j--;
         }
 
-        if (compare(arr[left], t) === 0) swap(arr, left, j);
+        if (compare(axis, arr[left], t) === 0) swap(arr, left, j);
         else {
             j++;
             swap(arr, j, right);
