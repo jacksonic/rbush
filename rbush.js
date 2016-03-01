@@ -14,7 +14,7 @@ function rbush(maxEntries, format, dimension) {
 
     // dimensions specifies the number of axes (2 ==> x,y; 3 ==> x,y,z; ...)
     dimension = parseInt(dimension);
-    if (dimension < 2) dimension = 2;
+    if (!dimension || dimension < 2) dimension = 2;
     this._dimension = dimension;
 
     // max entries in a node is 9 by default; min node fill is 40% for best performance
@@ -135,7 +135,7 @@ rbush.prototype = {
         this.data = {
             children: [],
             height: 1,
-            bbox: empty(),
+            bbox: empty(this._dimension),
             leaf: true
         };
         return this;
@@ -248,21 +248,22 @@ rbush.prototype = {
         // split the items into M mostly square/cube tiles
 
         var N2 = Math.ceil(N / M),
-            N1 = N2 * Math.ceil(Math.sqrt(M));
+            N1 = N2 * Math.ceil(Math.sqrt(M)),
+            self = this;
 
         var buildAxis = function buildAxis(axis, left, right, N1, N2) {
-          multiSelect(items, left, right, N1, this.compareMin, axis);
+          multiSelect(items, left, right, N1, self.compareMin, axis);
 
           for (var i = left; i <= right; i += N1) {
             var newRight = Math.min(i + N1 - 1, right);
-            if (axis + 1 < this._dimension) {
+            if (axis + 1 < self._dimension) {
               buildAxis(axis + 1, i, newRight, N2, N1); // swap N1, N2 each recursion?
             } else {
               // pack each entry recursively
-              node.children.push(this._build(items, i, newRight, height - 1));
+              node.children.push(self._build(items, i, newRight, height - 1));
             }
           }
-        }.bind(this);
+        };
         buildAxis(0, left, right, N1, N2);
 
         calcBBox(this._dimension, node, this.toBBox);
@@ -494,7 +495,7 @@ function calcBBox(dim, node, toBBox) {
 
 // min bounding rectangle of node children from k to p-1
 function distBBox(dim, node, k, p, toBBox) {
-    var bbox = empty();
+    var bbox = empty(dim);
 
     for (var i = k, child; i < p; i++) {
         child = node.children[i];
@@ -504,17 +505,16 @@ function distBBox(dim, node, k, p, toBBox) {
     return bbox;
 }
 // global functions don't know dimension
-var __empty__;
+var __empty__ = [];
 function empty(d) {
-  if (!__empty__) {
-    var ret = __empty__ = [];
+  if (!__empty__[d]) {
+    __empty__[d] = [];
     for (var i = 0; i < d; ++i) {
-      ret[i] = Infinity;
-      ret[d + i] = -Infinity;
+      __empty__[d][i] = Infinity;
+      __empty__[d][d + i] = -Infinity;
     }
-    return ret.slice();
   } else {
-    return __empty__.slice();
+    return __empty__[d].slice();
   }
 }
 
@@ -580,14 +580,10 @@ function contains(dim, a, b) {
 }
 
 function intersects(dim, a, b) {
-//     return b[0] <= a[2] &&
-//            b[1] <= a[3] &&
-//            b[2] >= a[0] &&
-//            b[3] >= a[1];
   var j, i;
   for (i = 0; i < dim; ++i) {
     j = dim + i;
-    if (a[j] > b[i] || b[j] < a[i]) return false;
+    if (a[j] < b[i] || b[j] < a[i]) return false;
   }
   return true;
 }

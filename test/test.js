@@ -70,11 +70,8 @@ t('#toBBox, #compareMinX, #compareMinY can be overriden to allow custom data str
     tree.toBBox = function (item) {
         return [item.minLng, item.minLat, item.maxLng, item.maxLat];
     };
-    tree.compareMinX = function (a, b) {
-        return a.minLng - b.minLng;
-    };
-    tree.compareMinY = function (a, b) {
-        return a.minLat - b.minLat;
+    tree.compareMin = function (axis, a, b) {
+      return (axis === 0) ? a.minLng - b.minLng : a.minLat - b.minLat;
     };
 
     var data = [
@@ -199,7 +196,7 @@ t('#collides returns true when search finds matching points', function (t) {
     var tree = rbush(4).load(data);
     var result = tree.collides([40, 20, 80, 70]);
 
-	t.same(result, true);
+  t.same(result, true);
 
     t.end();
 });
